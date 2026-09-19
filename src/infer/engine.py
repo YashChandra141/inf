@@ -10,7 +10,7 @@ from infer.config import ModelConfig, merge_eos_ids
 from infer.kv_cache import KVCache
 from infer.model.llama import LlamaForCausalLM
 from infer.sampling import SamplingParams, make_generator, sample_token
-from infer.tokenizer import HuggingFaceTokenizer
+from infer.tokenizer import HuggingFaceTokenizer, TokenizerLike
 from infer.weights import load_config, load_safetensors, remap_hf_state_dict, resolve_model_dir
 
 
@@ -47,7 +47,7 @@ class Engine:
     def __init__(
         self,
         model: LlamaForCausalLM,
-        tokenizer: HuggingFaceTokenizer,
+        tokenizer: TokenizerLike,
         config: ModelConfig,
         *,
         device: torch.device,
@@ -138,9 +138,7 @@ class Engine:
         if not token_ids:
             raise ValueError("prompt is empty")
         if len(token_ids) > self.max_seq_len:
-            raise ValueError(
-                f"prompt length {len(token_ids)} exceeds max_seq_len {self.max_seq_len}"
-            )
+            raise ValueError(f"prompt length {len(token_ids)} exceeds max_seq_len {self.max_seq_len}")
         tokens = torch.tensor([token_ids], device=self.device, dtype=torch.long)
         positions = torch.arange(len(token_ids), device=self.device, dtype=torch.long).unsqueeze(0)
         slots = torch.tensor([slot], device=self.device, dtype=torch.long)

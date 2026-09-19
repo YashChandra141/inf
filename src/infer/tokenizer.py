@@ -1,16 +1,12 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
 from jinja2 import BaseLoader, Environment, StrictUndefined
 from tokenizers import Tokenizer
-from typing import Protocol
-
-
-class ChatMessage(dict):
-    """Minimal mapping used by chat templates (`role`, `content`)."""
 
 
 def _raise_exception(message: str) -> None:
@@ -31,6 +27,7 @@ def render_chat_template(
         lstrip_blocks=True,
     )
     env.globals["raise_exception"] = _raise_exception
+    env.globals["strftime_now"] = lambda fmt: datetime.now().strftime(fmt)
     env.filters["tojson"] = lambda value, **_kwargs: json.dumps(value, ensure_ascii=False)
     compiled = env.from_string(template)
     ctx = dict(special_tokens or {})
@@ -40,6 +37,23 @@ def render_chat_template(
         tools=None,
         **ctx,
     )
+
+
+class TokenizerLike(Protocol):
+    eos_token_id: int | None
+    eos_token_ids: list[int]
+
+    def encode(self, text: str) -> list[int]: ...
+
+    def decode(self, ids: list[int], skip_special_tokens: bool = False) -> str: ...
+
+    def apply_chat_template(
+        self,
+        messages: list[dict[str, Any]],
+        *,
+        add_generation_prompt: bool = True,
+        tokenize: bool = True,
+    ) -> list[int] | str: ...
 
 
 class HuggingFaceTokenizer:
@@ -67,9 +81,7 @@ class HuggingFaceTokenizer:
         model_dir = Path(model_dir)
         tok_path = model_dir / "tokenizer.json"
         if not tok_path.exists():
-            raise FileNotFoundError(
-                f"{tok_path} is missing. This engine loads Hugging Face tokenizer.json files."
-            )
+            raise FileNotFoundError(f"{tok_path} is missing. This engine loads Hugging Face tokenizer.json files.")
         tokenizer = Tokenizer.from_file(str(tok_path))
 
         cfg_path = model_dir / "tokenizer_config.json"
@@ -110,7 +122,7 @@ class HuggingFaceTokenizer:
         pad_token_id = _id_for(tok_cfg.get("pad_token") or special_tokens.get("pad_token"))
 
         added = tok_cfg.get("added_tokens_decoder") or {}
-        eos_ids = []
+        eos_ids: list[int] = []
         if eos_token_id is not None:
             eos_ids.append(eos_token_id)
         for idx, info in added.items():
@@ -167,14 +179,10 @@ def _fallback_chat_prompt(messages: list[dict[str, Any]], *, add_generation_prom
     return "".join(parts)
 
 
-class TokenDecoder(Protocol):
-    def decode(self, ids: list[int], skip_special_tokens: bool = False) -> str: ...
-
-
 class IncrementalDecoder:
     """Decode token-by-token by diffing the full decoded prefix."""
 
-    def __init__(self, tokenizer: TokenDecoder) -> None:
+    def __init__(self, tokenizer: TokenizerLike) -> None:
         self._tokenizer = tokenizer
         self._ids: list[int] = []
         self._prev = ""

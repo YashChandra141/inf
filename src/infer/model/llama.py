@@ -1,9 +1,9 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import torch
 import torch.nn.functional as F
-
-from typing import TYPE_CHECKING
 
 from infer.config import ModelConfig
 from infer.model.layers import DecoderLayer, RMSNorm, RotaryEmbedding

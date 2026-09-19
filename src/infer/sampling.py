@@ -49,9 +49,7 @@ def _apply_top_p(logits: torch.Tensor, top_p: float) -> torch.Tensor:
     mask[..., 1:] = mask[..., :-1].clone()
     mask[..., 0] = False
     sorted_logits = sorted_logits.masked_fill(mask, torch.finfo(logits.dtype).min)
-    return logits.new_empty(logits.shape).fill_(torch.finfo(logits.dtype).min).scatter_(
-        0, sorted_idx, sorted_logits
-    )
+    return logits.new_empty(logits.shape).fill_(torch.finfo(logits.dtype).min).scatter_(0, sorted_idx, sorted_logits)
 
 
 def sample_token(

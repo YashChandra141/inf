@@ -9,7 +9,6 @@ from safetensors.torch import load_file
 
 from infer.config import ModelConfig
 
-
 HF_ALLOW_PATTERNS = [
     "config.json",
     "generation_config.json",
@@ -43,11 +42,7 @@ def load_safetensors(model_dir: Path) -> dict[str, torch.Tensor]:
         weight_map = json.loads(index_path.read_text(encoding="utf-8"))["weight_map"]
         files = sorted(set(weight_map.values()))
     else:
-        files = sorted(
-            p.name
-            for p in model_dir.glob("*.safetensors")
-            if p.is_file() and not p.name.startswith("._")
-        )
+        files = sorted(p.name for p in model_dir.glob("*.safetensors") if p.is_file() and not p.name.startswith("._"))
     if not files:
         raise FileNotFoundError(f"No .safetensors weight files found in {model_dir}")
 

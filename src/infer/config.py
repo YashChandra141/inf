@@ -5,7 +5,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-
 SUPPORTED_MODEL_TYPES = frozenset({"llama", "qwen2", "mistral"})
 
 

@@ -50,9 +50,7 @@ def apply_rotary_pos_emb(
 class RotaryEmbedding(torch.nn.Module):
     def __init__(self, head_dim: int, rope_theta: float) -> None:
         super().__init__()
-        inv_freq = 1.0 / (
-            rope_theta ** (torch.arange(0, head_dim, 2, dtype=torch.float32) / head_dim)
-        )
+        inv_freq = 1.0 / (rope_theta ** (torch.arange(0, head_dim, 2, dtype=torch.float32) / head_dim))
         self.register_buffer("inv_freq", inv_freq, persistent=False)
 
     def forward(self, positions: torch.Tensor, dtype: torch.dtype) -> tuple[torch.Tensor, torch.Tensor]:
@@ -79,9 +77,7 @@ def build_attn_mask(
 ) -> torch.Tensor:
     """Return an additive mask of shape [B, 1, T, kv_len]."""
     kv_pos = torch.arange(kv_len, device=query_positions.device)
-    allowed = (kv_pos[None, None, :] <= query_positions[:, :, None]) & (
-        kv_pos[None, None, :] < lengths[:, None, None]
-    )
+    allowed = (kv_pos[None, None, :] <= query_positions[:, :, None]) & (kv_pos[None, None, :] < lengths[:, None, None])
     mask = torch.zeros(
         query_positions.shape[0],
         1,
@@ -212,9 +208,7 @@ class DecoderLayer(torch.nn.Module):
     ) -> torch.Tensor:
         residual = hidden
         hidden = self.input_layernorm(hidden)
-        hidden = residual + self.self_attn(
-            hidden, positions, cos, sin, cache=cache, slots=slots, layer_idx=layer_idx
-        )
+        hidden = residual + self.self_attn(hidden, positions, cos, sin, cache=cache, slots=slots, layer_idx=layer_idx)
         residual = hidden
         hidden = self.post_attention_layernorm(hidden)
         return residual + self.mlp(hidden)

@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import queue
 import threading
-import time
 from dataclasses import dataclass, field
+
+import torch
 
 from infer.engine import Engine
 from infer.sampling import SamplingParams, make_generator, sample_token
@@ -16,9 +17,9 @@ class GenerationRequest:
     output: queue.Queue[int | None]
     tokens: list[int] = field(default_factory=list)
     slot: int | None = None
-    last_logits: object | None = None
+    last_logits: torch.Tensor | None = None
     generated: int = 0
-    generator: object | None = None
+    generator: torch.Generator | None = None
 
 
 class Scheduler:
@@ -74,69 +75,69 @@ class Scheduler:
         req.slot = slot
         req.last_logits = self.engine.prefill_slot(slot, req.prompt_tokens)
 
-    def _finish(self, req: GenerationRequest, active: list[GenerationRequest]) -> None:
+    def _complete(self, req: GenerationRequest) -> None:
         req.output.put(None)
         if req.slot is not None:
             self.engine.free_slot(req.slot)
             req.slot = None
-        if req in active:
-            active.remove(req)
+
+    def _abort_all(self, active: list[GenerationRequest]) -> None:
+        for req in active:
+            self._complete(req)
+        active.clear()
 
     def _run(self) -> None:
         active: list[GenerationRequest] = []
-        while not self._stop.is_set():
-            self._admit(active)
-            if not active:
-                try:
-                    item = self._waiting.get(timeout=self.poll_timeout)
-                except queue.Empty:
+        try:
+            while not self._stop.is_set():
+                self._admit(active)
+                if not active:
+                    try:
+                        item = self._waiting.get(timeout=self.poll_timeout)
+                    except queue.Empty:
+                        continue
+                    if item is None:
+                        continue
+                    self._prefill(item)
+                    active.append(item)
                     continue
-                if item is None:
+
+                next_ids: list[int] = []
+                still_active: list[GenerationRequest] = []
+                for req in active:
+                    assert req.last_logits is not None and req.slot is not None
+                    max_tokens = min(
+                        req.params.max_tokens,
+                        self.engine.max_seq_len - len(req.prompt_tokens),
+                    )
+                    if req.generated >= max_tokens:
+                        self._complete(req)
+                        continue
+                    stop_ids = set(req.params.stop_token_ids) | set(self.engine.stop_token_ids)
+                    token_id = sample_token(
+                        req.last_logits,
+                        req.params,
+                        req.tokens,
+                        req.generator,
+                    )
+                    if token_id in stop_ids:
+                        self._complete(req)
+                        continue
+                    req.output.put(token_id)
+                    req.tokens.append(token_id)
+                    req.generated += 1
+                    next_ids.append(token_id)
+                    still_active.append(req)
+
+                active = still_active
+                if not active:
                     continue
-                self._prefill(item)
-                active.append(item)
-                continue
-
-            next_ids: list[int] = []
-            still_active: list[GenerationRequest] = []
-            finished: list[GenerationRequest] = []
-            for req in active:
-                assert req.last_logits is not None and req.slot is not None
-                stop_ids = set(req.params.stop_token_ids) | set(self.engine.stop_token_ids)
-                max_tokens = min(
-                    req.params.max_tokens,
-                    self.engine.max_seq_len - len(req.prompt_tokens),
-                )
-                token_id = sample_token(
-                    req.last_logits,  # type: ignore[arg-type]
-                    req.params,
-                    req.tokens,
-                    req.generator,  # type: ignore[arg-type]
-                )
-                req.generated += 1
-                if token_id in stop_ids or req.generated > max_tokens:
-                    finished.append(req)
-                    continue
-                req.output.put(token_id)
-                req.tokens.append(token_id)
-                next_ids.append(token_id)
-                still_active.append(req)
-
-            for req in finished:
-                self._finish(req, active)
-
-            active = still_active
-            if not active:
-                continue
-            slots = [req.slot for req in active if req.slot is not None]
-            logits = self.engine.decode_slots(slots, next_ids)
-            for req, row in zip(active, logits, strict=True):
-                req.last_logits = row
-
-            # Tiny pause so a stopped server can unwind; decode itself is the real wait.
-            if self._stop.is_set():
-                break
-            time.sleep(0)
+                slots = [req.slot for req in active if req.slot is not None]
+                logits = self.engine.decode_slots(slots, next_ids)
+                for req, row in zip(active, logits, strict=True):
+                    req.last_logits = row
+        finally:
+            self._abort_all(active)
 
 
 def iter_queue(out: queue.Queue[int | None]) -> list[int]:
